@@ -1514,20 +1514,11 @@ export default {
     console.log('Request Path:', pathname);
 
     if (['/mcp', '/login', '/setup', '/auth', '/authorize', '/token'].includes(pathname)) {
-      if (pathname === '/authorize') {
-        return await handleAuthorizeRequest(request, env);
-      }
-
-      if (pathname === '/token') {
-        return await handleTokenRequest(request, env);
-      }
-
-      if (pathname === '/auth' || pathname === '/setup' || pathname === '/login') {
-        return await handleSetupRequest(request, env);
-      }
+      if (pathname === '/authorize') return await handleAuthorizeRequest(request, env);
+      if (pathname === '/token') return await handleTokenRequest(request, env);
+      if (pathname === '/auth' || pathname === '/setup' || pathname === '/login') return await handleSetupRequest(request, env);
 
       if (pathname === '/mcp') {
-        // CORS preflight
         if (request.method === 'OPTIONS') {
           return new Response(null, {
             status: 204,
@@ -1539,23 +1530,15 @@ export default {
           });
         }
 
-        // ---- GET: SSE stream — sends endpoint event so clients know where to POST
         if (request.method === 'GET') {
           const origin = new URL(request.url).origin;
           const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
           const writer = writable.getWriter();
           const encoder = new TextEncoder();
-
-          writer.write(encoder.encode(
-            sseEvent('endpoint', { uri: `${origin}/mcp` }),
-          )).catch(() => {});
-
+          writer.write(encoder.encode(sseEvent('endpoint', { uri: `${origin}/mcp` }))).catch(() => {});
           const keepAlive = setInterval(() => {
-            writer.write(encoder.encode(': ping\n\n')).catch(() => {
-              clearInterval(keepAlive);
-            });
+            writer.write(encoder.encode(': ping\n\n')).catch(() => clearInterval(keepAlive));
           }, 20000);
-
           return new Response(readable, {
             headers: {
               'Content-Type': 'text/event-stream',
@@ -1566,16 +1549,13 @@ export default {
           });
         }
 
-        // ---- POST: JSON-RPC message
         if (request.method === 'POST') {
           const authorizationHeader = request.headers.get('Authorization') ?? request.headers.get('authorization');
           const apiKeyHeader = request.headers.get('X-API-Key') ?? request.headers.get('x-api-key');
-
           const authCandidates = [
             authorizationHeader?.trim().replace(/^Bearer\s+/i, '').trim() ?? '',
             apiKeyHeader?.trim() ?? '',
           ].filter(Boolean);
-
           const uniqueAuthCandidates = [...new Set(authCandidates)];
           if (uniqueAuthCandidates.length === 0) {
             return new Response(JSON.stringify({ error: "Missing authentication token. Use Authorization: Bearer <token>, Authorization: <token>, or X-API-Key: <token>." }), {
@@ -1587,13 +1567,11 @@ export default {
               },
             });
           }
-
           let credentials: Awaited<ReturnType<typeof loadStoredCredentials>> = null;
           for (const candidate of uniqueAuthCandidates) {
             credentials = await loadStoredCredentials(env, candidate);
             if (credentials) break;
           }
-
           if (!credentials) {
             return new Response(JSON.stringify({ error: "Invalid authentication token. Open /auth to save credentials and use the token shown there." }), {
               status: 401,
@@ -1604,50 +1582,23 @@ export default {
               },
             });
           }
-
           let body: JsonRpcRequest;
-          try {
-            body = (await request.json()) as JsonRpcRequest;
-          } catch {
-            return new Response(
-              JSON.stringify({
-                jsonrpc: '2.0',
-                id: null,
-                error: { code: -32700, message: 'Parse error' },
-              }),
-              { status: 400, headers: { 'Content-Type': 'application/json' } },
-            );
+          try { body = (await request.json()) as JsonRpcRequest; } catch {
+            return new Response(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }), { status: 400, headers: { "Content-Type": "application/json" } });
           }
-
           const bearerToken = uniqueAuthCandidates[0];
           const response = await handleJsonRpc(body, env, bearerToken);
-
           if (response === null) {
-            return new Response(null, {
-              status: 204,
-              headers: { 'Access-Control-Allow-Origin': '*' },
-            });
+            return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
           }
-
-          const acceptsSse = (request.headers.get('Accept') ?? '').includes('text/event-stream');
+          const acceptsSse = (request.headers.get("Accept") ?? "").includes("text/event-stream");
           if (acceptsSse) {
-            return new Response(sseEvent('message', response), {
-              headers: {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Access-Control-Allow-Origin': '*',
-              },
-            });
+            return new Response(sseEvent("message", response), { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Access-Control-Allow-Origin": "*" } });
           }
-
-          return new Response(JSON.stringify(response), {
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            },
-          });
+          return new Response(JSON.stringify(response), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
         }
       }
+      return new Response('Not Found', { status: 404 });
     }
 
     return new Response('Not Found', { status: 404 });
