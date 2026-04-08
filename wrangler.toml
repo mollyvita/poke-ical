@@ -1,5 +1,5 @@
 name = "poke-ical"
-main = "worker.ts"
+main = "src/worker.ts"
 compatibility_date = "2025-01-01"
 
 [[kv_namespaces]]
