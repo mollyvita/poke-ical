@@ -1111,17 +1111,22 @@ export default {
           headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization',
+            'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization, X-API-Key',
           },
         });
       }
 
-      const authHeader = request.headers.get('Authorization') ?? request.headers.get('authorization');
-      const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
-      const bearerToken = bearerMatch?.[1]?.trim() ?? '';
+      const authorizationHeader = request.headers.get('Authorization') ?? request.headers.get('authorization');
+      const apiKeyHeader = request.headers.get('X-API-Key') ?? request.headers.get('x-api-key');
 
-      if (!bearerToken) {
-        return new Response(JSON.stringify({ error: "Missing Authorization header. Use Authorization: Bearer <token>." }), {
+      const authCandidates = [
+        authorizationHeader?.trim().replace(/^Bearer\s+/i, '').trim() ?? '',
+        apiKeyHeader?.trim() ?? '',
+      ].filter(Boolean);
+
+      const uniqueAuthCandidates = [...new Set(authCandidates)];
+      if (uniqueAuthCandidates.length === 0) {
+        return new Response(JSON.stringify({ error: "Missing authentication token. Use Authorization: Bearer <token>, Authorization: <token>, or X-API-Key: <token>." }), {
           status: 401,
           headers: {
             'Content-Type': 'application/json; charset=utf-8',
@@ -1131,9 +1136,14 @@ export default {
         });
       }
 
-      const credentials = await loadStoredCredentials(env, bearerToken);
+      let credentials: Awaited<ReturnType<typeof loadStoredCredentials>> = null;
+      for (const candidate of uniqueAuthCandidates) {
+        credentials = await loadStoredCredentials(env, candidate);
+        if (credentials) break;
+      }
+
       if (!credentials) {
-        return new Response(JSON.stringify({ error: "Unknown bearer token. Open /auth to save credentials and use the token shown there." }), {
+        return new Response(JSON.stringify({ error: "Invalid authentication token. Open /auth to save credentials and use the token shown there." }), {
           status: 401,
           headers: {
             'Content-Type': 'application/json; charset=utf-8',
