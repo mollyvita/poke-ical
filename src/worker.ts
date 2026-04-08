@@ -1512,9 +1512,6 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // -----------------------------------------------------------------------
-    // /auth, /setup, /login — simple credential setup page
-    // -----------------------------------------------------------------------
     if (url.pathname === '/authorize') {
       return await handleAuthorizeRequest(request, env);
     }
@@ -1523,19 +1520,10 @@ export default {
       return await handleTokenRequest(request, env);
     }
 
-    if (
-      url.pathname === '/auth' ||
-      url.pathname === '/setup' ||
-      url.pathname === '/login' ||
-      url.pathname === '/auth/start' ||
-      url.pathname === '/auth/callback'
-    ) {
+    if (url.pathname === '/auth' || url.pathname === '/setup' || url.pathname === '/login') {
       return await handleSetupRequest(request, env);
     }
 
-    // -----------------------------------------------------------------------
-    // /mcp  — MCP over SSE
-    // -----------------------------------------------------------------------
     if (url.pathname === '/mcp') {
       // CORS preflight
       if (request.method === 'OPTIONS') {
@@ -1657,15 +1645,6 @@ export default {
           },
         });
       }
-    }    // -----------------------------------------------------------------------
-    // /health
-    // -----------------------------------------------------------------------
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ ok: true, version: '2.0.0' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    return new Response('Not Found', { status: 404 });
+    }    return new Response('Not Found', { status: 404 });
   },
 };
