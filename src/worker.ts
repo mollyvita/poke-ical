@@ -2,7 +2,7 @@
  * poke-ical: iCloud Calendar MCP Server (Cloudflare Worker)
  *
  * Exposes 9 CalDAV tools via the Model Context Protocol over SSE.
- * Endpoint: /mcp
+ * Endpoints: /mcp, /authorize, /token
  *
  * Required Worker secrets:
  *   OAUTH_ENCRYPTION_KEY  — high-entropy secret used to encrypt stored credentials
@@ -165,6 +165,58 @@ type ConfiguredCredentials = {
   credentials: StoredCaldavCredentials;
 };
 
+type StoredOAuthAuthorizationCode = {
+  kind: 'authorization_code';
+  credentialToken: string;
+  clientId?: string;
+  redirectUri?: string;
+  scope?: string;
+  codeChallenge?: string;
+  codeChallengeMethod?: string;
+  state?: string;
+  createdAt: number;
+  expiresAt: number;
+};
+
+type StoredOAuthAccessToken = {
+  kind: 'access_token';
+  credentialToken: string;
+  clientId?: string;
+  scope?: string;
+  refreshToken: string;
+  createdAt: number;
+  expiresAt: number;
+};
+
+type StoredOAuthRefreshToken = {
+  kind: 'refresh_token';
+  credentialToken: string;
+  clientId?: string;
+  scope?: string;
+  accessToken: string;
+  createdAt: number;
+  expiresAt: number;
+};
+
+const OAUTH_AUTH_CODE_KV_PREFIX = 'oauth:auth-code:';
+const OAUTH_ACCESS_TOKEN_KV_PREFIX = 'oauth:access-token:';
+const OAUTH_REFRESH_TOKEN_KV_PREFIX = 'oauth:refresh-token:';
+const OAUTH_AUTH_CODE_TTL_SECONDS = 300;
+const OAUTH_ACCESS_TOKEN_TTL_SECONDS = 3600;
+const OAUTH_REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+function makeOAuthAuthCodeKey(code: string): string {
+  return `${OAUTH_AUTH_CODE_KV_PREFIX}${code}`;
+}
+
+function makeOAuthAccessTokenKey(token: string): string {
+  return `${OAUTH_ACCESS_TOKEN_KV_PREFIX}${token}`;
+}
+
+function makeOAuthRefreshTokenKey(token: string): string {
+  return `${OAUTH_REFRESH_TOKEN_KV_PREFIX}${token}`;
+}
+
 function makeCredentialsKey(token: string): string {
   return `${CREDENTIALS_KV_PREFIX}${token}`;
 }
@@ -191,9 +243,23 @@ async function saveStoredCredentials(env: Env, token: string, appleId: string, a
   await env.TOKEN_KV.put(LATEST_TOKEN_KV_KEY, token);
 }
 
+async function resolveCredentialToken(env: Env, token: string): Promise<string | null> {
+  const direct = await env.TOKEN_KV.get(makeCredentialsKey(token));
+  if (direct) return token;
+
+  const accessRecord = await readJsonRecord<StoredOAuthAccessToken>(env, makeOAuthAccessTokenKey(token));
+  if (accessRecord && accessRecord.kind === 'access_token' && accessRecord.expiresAt > Date.now()) {
+    return accessRecord.credentialToken;
+  }
+
+  return null;
+}
+
 async function loadStoredCredentials(env: Env, token: string): Promise<StoredCaldavCredentials | null> {
   assertRuntimeConfig(env);
-  const raw = await env.TOKEN_KV.get(makeCredentialsKey(token));
+  const credentialToken = await resolveCredentialToken(env, token);
+  if (!credentialToken) return null;
+  const raw = await env.TOKEN_KV.get(makeCredentialsKey(credentialToken));
   if (raw) {
     return await decryptJson<StoredCaldavCredentials>(env.OAUTH_ENCRYPTION_KEY, raw);
   }
@@ -237,6 +303,365 @@ async function loadConfiguredCredentials(env: Env): Promise<ConfiguredCredential
   }
 
   return null;
+}
+
+function normalizeFormValue(value: FormDataEntryValue | null): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseOAuthRequestData(source: URLSearchParams | FormData): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (source instanceof URLSearchParams) {
+    for (const [key, value] of source.entries()) out[key] = value.trim();
+  } else {
+    for (const [key, value] of source.entries()) out[key] = normalizeFormValue(value);
+  }
+  return out;
+}
+
+async function readJsonRecord<T>(env: Env, key: string): Promise<T | null> {
+  const raw = await env.TOKEN_KV.get(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function writeJsonRecord(env: Env, key: string, value: unknown, expirationTtl?: number): Promise<void> {
+  await env.TOKEN_KV.put(key, JSON.stringify(value), expirationTtl ? { expirationTtl } : undefined);
+}
+
+function oauthError(status: number, error: string, description: string): Response {
+  return new Response(JSON.stringify({ error, error_description: description }), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Pragma': 'no-cache',
+      'Access-Control-Allow-Origin': '*',
+    },
+  });
+}
+
+async function computePkceChallenge(verifier: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(verifier));
+  return base64UrlEncode(new Uint8Array(digest));
+}
+
+function renderAuthorizePage(options: {
+  credentials: StoredCaldavCredentials | null;
+  responseType?: string;
+  clientId?: string;
+  redirectUri?: string;
+  scope?: string;
+  state?: string;
+  codeChallenge?: string;
+  codeChallengeMethod?: string;
+  error?: string;
+}): string {
+  const currentStatus = options.credentials
+    ? `Authorize access to the calendars linked to ${escapeHtml(maskAppleId(options.credentials.appleId))}.`
+    : 'No CalDAV credentials are configured yet.';
+  const error = options.error ? `<p style="color:#ff8a8a">${escapeHtml(options.error)}</p>` : '';
+  const hidden = (name: string, value = '') => `<input type="hidden" name="${name}" value="${escapeHtml(value)}" />`;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Authorize poke-ical</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 48px auto; padding: 0 16px; line-height: 1.5; }
+    .card { border: 1px solid #ddd; border-radius: 16px; padding: 24px; }
+    button { padding: 10px 16px; border: 0; border-radius: 10px; background: #2563eb; color: #fff; cursor: pointer; }
+    code { word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Authorize</h1>
+    <p>${escapeHtml(currentStatus)}</p>
+    ${error}
+    ${options.credentials ? `<form method="post" action="/authorize">
+      ${hidden('response_type', options.responseType || 'code')}
+      ${hidden('client_id', options.clientId)}
+      ${hidden('redirect_uri', options.redirectUri)}
+      ${hidden('scope', options.scope)}
+      ${hidden('state', options.state)}
+      ${hidden('code_challenge', options.codeChallenge)}
+      ${hidden('code_challenge_method', options.codeChallengeMethod)}
+      <button type="submit">Authorize</button>
+    </form>` : `<p>Set up CalDAV credentials at <code>/auth</code> first.</p>`}
+  </div>
+</body>
+</html>`;
+}
+
+function buildOAuthRedirectUri(redirectUri: string, code: string, state?: string): string {
+  const redirect = new URL(redirectUri);
+  redirect.searchParams.set('code', code);
+  if (state) redirect.searchParams.set('state', state);
+  return redirect.toString();
+}
+
+async function issueOAuthTokens(env: Env, args: {
+  credentialToken: string;
+  clientId?: string;
+  scope?: string;
+}): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; scope?: string }> {
+  const accessToken = generateAuthToken();
+  const refreshToken = generateAuthToken();
+  const createdAt = Date.now();
+  const accessRecord: StoredOAuthAccessToken = {
+    kind: 'access_token',
+    credentialToken: args.credentialToken,
+    clientId: args.clientId,
+    scope: args.scope,
+    refreshToken,
+    createdAt,
+    expiresAt: createdAt + OAUTH_ACCESS_TOKEN_TTL_SECONDS * 1000,
+  };
+  const refreshRecord: StoredOAuthRefreshToken = {
+    kind: 'refresh_token',
+    credentialToken: args.credentialToken,
+    clientId: args.clientId,
+    scope: args.scope,
+    accessToken,
+    createdAt,
+    expiresAt: createdAt + OAUTH_REFRESH_TOKEN_TTL_SECONDS * 1000,
+  };
+  await writeJsonRecord(env, makeOAuthAccessTokenKey(accessToken), accessRecord, OAUTH_ACCESS_TOKEN_TTL_SECONDS);
+  await writeJsonRecord(env, makeOAuthRefreshTokenKey(refreshToken), refreshRecord, OAUTH_REFRESH_TOKEN_TTL_SECONDS);
+  return { accessToken, refreshToken, expiresIn: OAUTH_ACCESS_TOKEN_TTL_SECONDS, scope: args.scope };
+}
+
+async function handleAuthorizeRequest(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const missing = getMissingRuntimeConfig(env);
+  if (missing.length > 0) return buildMissingRuntimeConfigResponse(missing, true);
+
+  const configured = await loadConfiguredCredentials(env);
+  const query = parseOAuthRequestData(url.searchParams);
+
+  if (request.method === 'GET') {
+    if (query.response_type && query.response_type !== 'code') {
+      return new Response(renderAuthorizePage({
+        credentials: configured?.credentials ?? null,
+        responseType: query.response_type,
+        clientId: query.client_id,
+        redirectUri: query.redirect_uri,
+        scope: query.scope,
+        state: query.state,
+        codeChallenge: query.code_challenge,
+        codeChallengeMethod: query.code_challenge_method,
+        error: 'Only response_type=code is supported.',
+      }), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    }
+
+    return new Response(renderAuthorizePage({
+      credentials: configured?.credentials ?? null,
+      responseType: query.response_type || 'code',
+      clientId: query.client_id,
+      redirectUri: query.redirect_uri,
+      scope: query.scope,
+      state: query.state,
+      codeChallenge: query.code_challenge,
+      codeChallengeMethod: query.code_challenge_method,
+    }), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  }
+
+  if (request.method !== 'POST') {
+    return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET, POST' } });
+  }
+
+  if (!configured) {
+    return new Response(renderAuthorizePage({ credentials: null, error: 'No CalDAV credentials are configured yet.' }), {
+      status: 400,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+  }
+
+  const form = parseOAuthRequestData(await request.formData());
+  const responseType = form.response_type || query.response_type || 'code';
+  if (responseType !== 'code') {
+    return new Response(renderAuthorizePage({
+      credentials: configured.credentials,
+      responseType,
+      clientId: form.client_id || query.client_id,
+      redirectUri: form.redirect_uri || query.redirect_uri,
+      scope: form.scope || query.scope,
+      state: form.state || query.state,
+      codeChallenge: form.code_challenge || query.code_challenge,
+      codeChallengeMethod: form.code_challenge_method || query.code_challenge_method,
+      error: 'Only response_type=code is supported.',
+    }), { status: 400, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  }
+
+  const redirectUri = form.redirect_uri || query.redirect_uri;
+  if (!redirectUri) {
+    return new Response(renderAuthorizePage({
+      credentials: configured.credentials,
+      clientId: form.client_id || query.client_id,
+      scope: form.scope || query.scope,
+      state: form.state || query.state,
+      codeChallenge: form.code_challenge || query.code_challenge,
+      codeChallengeMethod: form.code_challenge_method || query.code_challenge_method,
+      error: 'redirect_uri is required.',
+    }), { status: 400, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  }
+
+  const code = generateAuthToken();
+  const codeRecord: StoredOAuthAuthorizationCode = {
+    kind: 'authorization_code',
+    credentialToken: configured.token,
+    clientId: form.client_id || query.client_id || undefined,
+    redirectUri,
+    scope: form.scope || query.scope || undefined,
+    codeChallenge: form.code_challenge || query.code_challenge || undefined,
+    codeChallengeMethod: form.code_challenge_method || query.code_challenge_method || undefined,
+    state: form.state || query.state || undefined,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + OAUTH_AUTH_CODE_TTL_SECONDS * 1000,
+  };
+  await writeJsonRecord(env, makeOAuthAuthCodeKey(code), codeRecord, OAUTH_AUTH_CODE_TTL_SECONDS);
+
+  let redirectLocation: string;
+  try {
+    redirectLocation = buildOAuthRedirectUri(redirectUri, code, codeRecord.state);
+  } catch {
+    return new Response(renderAuthorizePage({
+      credentials: configured.credentials,
+      clientId: codeRecord.clientId,
+      redirectUri,
+      scope: codeRecord.scope,
+      state: codeRecord.state,
+      codeChallenge: codeRecord.codeChallenge,
+      codeChallengeMethod: codeRecord.codeChallengeMethod,
+      error: 'redirect_uri must be an absolute URL.',
+    }), { status: 400, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  }
+
+  return Response.redirect(redirectLocation, 302);
+}
+
+async function handleTokenRequest(request: Request, env: Env): Promise<Response> {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization, X-API-Key',
+      },
+    });
+  }
+
+  const missing = getMissingRuntimeConfig(env);
+  if (missing.length > 0) return buildMissingRuntimeConfigResponse(missing, false);
+
+  if (request.method !== 'POST') {
+    return oauthError(405, 'invalid_request', 'Method Not Allowed');
+  }
+
+  const form = parseOAuthRequestData(await request.formData());
+  const grantType = form.grant_type;
+  if (!grantType) return oauthError(400, 'invalid_request', 'grant_type is required.');
+
+  if (grantType === 'authorization_code') {
+    const code = form.code;
+    const redirectUri = form.redirect_uri;
+    const codeVerifier = form.code_verifier;
+    if (!code) return oauthError(400, 'invalid_request', 'code is required.');
+
+    const codeKey = makeOAuthAuthCodeKey(code);
+    const codeRecord = await readJsonRecord<StoredOAuthAuthorizationCode>(env, codeKey);
+    if (!codeRecord || codeRecord.kind !== 'authorization_code' || codeRecord.expiresAt <= Date.now()) {
+      return oauthError(400, 'invalid_grant', 'Authorization code is invalid or expired.');
+    }
+    if (codeRecord.redirectUri && redirectUri && codeRecord.redirectUri !== redirectUri) {
+      return oauthError(400, 'invalid_grant', 'redirect_uri does not match the authorization request.');
+    }
+    if (codeRecord.redirectUri && !redirectUri) {
+      return oauthError(400, 'invalid_grant', 'redirect_uri is required.');
+    }
+    if (codeRecord.clientId && form.client_id && codeRecord.clientId !== form.client_id) {
+      return oauthError(400, 'invalid_grant', 'client_id does not match the authorization request.');
+    }
+    if (codeRecord.codeChallenge) {
+      if (!codeVerifier) return oauthError(400, 'invalid_grant', 'code_verifier is required.');
+      const method = (codeRecord.codeChallengeMethod || 'S256').toUpperCase();
+      const expected = method === 'PLAIN' ? codeVerifier : await computePkceChallenge(codeVerifier);
+      if (expected !== codeRecord.codeChallenge) {
+        return oauthError(400, 'invalid_grant', 'PKCE verification failed.');
+      }
+    }
+
+    try {
+      await env.TOKEN_KV.delete(codeKey);
+    } catch {
+      // best effort
+    }
+
+    const tokenSet = await issueOAuthTokens(env, {
+      credentialToken: codeRecord.credentialToken,
+      clientId: codeRecord.clientId,
+      scope: codeRecord.scope,
+    });
+
+    return new Response(JSON.stringify({
+      access_token: tokenSet.accessToken,
+      refresh_token: tokenSet.refreshToken,
+      token_type: 'Bearer',
+      expires_in: tokenSet.expiresIn,
+      scope: tokenSet.scope,
+    }), {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Pragma': 'no-cache',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
+
+  if (grantType === 'refresh_token') {
+    const refreshToken = form.refresh_token;
+    if (!refreshToken) return oauthError(400, 'invalid_request', 'refresh_token is required.');
+
+    const refreshRecord = await readJsonRecord<StoredOAuthRefreshToken>(env, makeOAuthRefreshTokenKey(refreshToken));
+    if (!refreshRecord || refreshRecord.kind !== 'refresh_token' || refreshRecord.expiresAt <= Date.now()) {
+      return oauthError(400, 'invalid_grant', 'Refresh token is invalid or expired.');
+    }
+    if (refreshRecord.clientId && form.client_id && refreshRecord.clientId !== form.client_id) {
+      return oauthError(400, 'invalid_grant', 'client_id does not match the refresh token.');
+    }
+
+    const tokenSet = await issueOAuthTokens(env, {
+      credentialToken: refreshRecord.credentialToken,
+      clientId: refreshRecord.clientId,
+      scope: refreshRecord.scope,
+    });
+
+    return new Response(JSON.stringify({
+      access_token: tokenSet.accessToken,
+      refresh_token: tokenSet.refreshToken,
+      token_type: 'Bearer',
+      expires_in: tokenSet.expiresIn,
+      scope: tokenSet.scope,
+    }), {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Pragma': 'no-cache',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
+
+  return oauthError(400, 'unsupported_grant_type', 'Supported grant_type values are authorization_code and refresh_token.');
 }
 
 function renderSetupPage(options: { credentials: StoredCaldavCredentials | null; token?: string; notice?: string; error?: string }): string {
@@ -1090,6 +1515,14 @@ export default {
     // -----------------------------------------------------------------------
     // /auth, /setup, /login — simple credential setup page
     // -----------------------------------------------------------------------
+    if (url.pathname === '/authorize') {
+      return await handleAuthorizeRequest(request, env);
+    }
+
+    if (url.pathname === '/token') {
+      return await handleTokenRequest(request, env);
+    }
+
     if (
       url.pathname === '/auth' ||
       url.pathname === '/setup' ||
@@ -1111,7 +1544,7 @@ export default {
           headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization, X-API-Key',
+            'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization, X-API-Key, X-Requested-With',
           },
         });
       }
