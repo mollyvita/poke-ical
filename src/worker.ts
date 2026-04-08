@@ -1510,141 +1510,146 @@ function sseEvent(eventType: string, data: unknown): string {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
+    const { pathname } = new URL(request.url);
+    console.log('Request Path:', pathname);
 
-    if (url.pathname === '/authorize') {
-      return await handleAuthorizeRequest(request, env);
-    }
-
-    if (url.pathname === '/token') {
-      return await handleTokenRequest(request, env);
-    }
-
-    if (url.pathname === '/auth' || url.pathname === '/setup' || url.pathname === '/login') {
-      return await handleSetupRequest(request, env);
-    }
-
-    if (url.pathname === '/mcp') {
-      // CORS preflight
-      if (request.method === 'OPTIONS') {
-        return new Response(null, {
-          status: 204,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization, X-API-Key, X-Requested-With',
-          },
-        });
-      }
-      // ---- GET: SSE stream — sends endpoint event so clients know where to POST
-      if (request.method === 'GET') {
-        const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-        const writer = writable.getWriter();
-        const encoder = new TextEncoder();
-
-        // Send endpoint event immediately
-        writer.write(encoder.encode(
-          sseEvent('endpoint', { uri: `${url.origin}/mcp` }),
-        )).catch(() => {});
-
-        // Periodic comment-based keepalive (CF Workers can't use setInterval
-        // reliably in long-lived streams, but this is fine for most clients)
-        const keepAlive = setInterval(() => {
-          writer.write(encoder.encode(': ping\n\n')).catch(() => {
-            clearInterval(keepAlive);
-          });
-        }, 20000);
-
-        return new Response(readable, {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
+    if (['/mcp', '/login', '/setup', '/auth', '/authorize', '/token'].includes(pathname)) {
+      if (pathname === '/authorize') {
+        return await handleAuthorizeRequest(request, env);
       }
 
-      // ---- POST: JSON-RPC message
-      if (request.method === 'POST') {
-        const authorizationHeader = request.headers.get('Authorization') ?? request.headers.get('authorization');
-        const apiKeyHeader = request.headers.get('X-API-Key') ?? request.headers.get('x-api-key');
+      if (pathname === '/token') {
+        return await handleTokenRequest(request, env);
+      }
 
-        const authCandidates = [
-          authorizationHeader?.trim().replace(/^Bearer\s+/i, '').trim() ?? '',
-          apiKeyHeader?.trim() ?? '',
-        ].filter(Boolean);
+      if (pathname === '/auth' || pathname === '/setup' || pathname === '/login') {
+        return await handleSetupRequest(request, env);
+      }
 
-        const uniqueAuthCandidates = [...new Set(authCandidates)];
-        if (uniqueAuthCandidates.length === 0) {
-          return new Response(JSON.stringify({ error: "Missing authentication token. Use Authorization: Bearer <token>, Authorization: <token>, or X-API-Key: <token>." }), {
-            status: 401,
-            headers: {
-              'Content-Type': 'application/json; charset=utf-8',
-              'WWW-Authenticate': 'Bearer realm="poke-ical"',
-              'Access-Control-Allow-Origin': '*',
-            },
-          });
-        }
-
-        let credentials: Awaited<ReturnType<typeof loadStoredCredentials>> = null;
-        for (const candidate of uniqueAuthCandidates) {
-          credentials = await loadStoredCredentials(env, candidate);
-          if (credentials) break;
-        }
-
-        if (!credentials) {
-          return new Response(JSON.stringify({ error: "Invalid authentication token. Open /auth to save credentials and use the token shown there." }), {
-            status: 401,
-            headers: {
-              'Content-Type': 'application/json; charset=utf-8',
-              'WWW-Authenticate': 'Bearer realm="poke-ical"',
-              'Access-Control-Allow-Origin': '*',
-            },
-          });
-        }
-        let body: JsonRpcRequest;
-        try {
-          body = (await request.json()) as JsonRpcRequest;
-        } catch {
-          return new Response(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              id: null,
-              error: { code: -32700, message: 'Parse error' },
-            }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } },
-          );
-        }
-
-        const response = await handleJsonRpc(body, env, bearerToken);
-
-        // Notification — 204 no content
-        if (response === null) {
+      if (pathname === '/mcp') {
+        // CORS preflight
+        if (request.method === 'OPTIONS') {
           return new Response(null, {
             status: 204,
-            headers: { 'Access-Control-Allow-Origin': '*' },
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+              'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization, X-API-Key, X-Requested-With',
+            },
           });
         }
 
-        const acceptsSse = (request.headers.get('Accept') ?? '').includes('text/event-stream');
-        if (acceptsSse) {
-          return new Response(sseEvent('message', response), {
+        // ---- GET: SSE stream — sends endpoint event so clients know where to POST
+        if (request.method === 'GET') {
+          const origin = new URL(request.url).origin;
+          const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+          const writer = writable.getWriter();
+          const encoder = new TextEncoder();
+
+          writer.write(encoder.encode(
+            sseEvent('endpoint', { uri: `${origin}/mcp` }),
+          )).catch(() => {});
+
+          const keepAlive = setInterval(() => {
+            writer.write(encoder.encode(': ping\n\n')).catch(() => {
+              clearInterval(keepAlive);
+            });
+          }, 20000);
+
+          return new Response(readable, {
             headers: {
               'Content-Type': 'text/event-stream',
               'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
               'Access-Control-Allow-Origin': '*',
             },
           });
         }
 
-        return new Response(JSON.stringify(response), {
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
+        // ---- POST: JSON-RPC message
+        if (request.method === 'POST') {
+          const authorizationHeader = request.headers.get('Authorization') ?? request.headers.get('authorization');
+          const apiKeyHeader = request.headers.get('X-API-Key') ?? request.headers.get('x-api-key');
+
+          const authCandidates = [
+            authorizationHeader?.trim().replace(/^Bearer\s+/i, '').trim() ?? '',
+            apiKeyHeader?.trim() ?? '',
+          ].filter(Boolean);
+
+          const uniqueAuthCandidates = [...new Set(authCandidates)];
+          if (uniqueAuthCandidates.length === 0) {
+            return new Response(JSON.stringify({ error: "Missing authentication token. Use Authorization: Bearer <token>, Authorization: <token>, or X-API-Key: <token>." }), {
+              status: 401,
+              headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                'WWW-Authenticate': 'Bearer realm="poke-ical"',
+                'Access-Control-Allow-Origin': '*',
+              },
+            });
+          }
+
+          let credentials: Awaited<ReturnType<typeof loadStoredCredentials>> = null;
+          for (const candidate of uniqueAuthCandidates) {
+            credentials = await loadStoredCredentials(env, candidate);
+            if (credentials) break;
+          }
+
+          if (!credentials) {
+            return new Response(JSON.stringify({ error: "Invalid authentication token. Open /auth to save credentials and use the token shown there." }), {
+              status: 401,
+              headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                'WWW-Authenticate': 'Bearer realm="poke-ical"',
+                'Access-Control-Allow-Origin': '*',
+              },
+            });
+          }
+
+          let body: JsonRpcRequest;
+          try {
+            body = (await request.json()) as JsonRpcRequest;
+          } catch {
+            return new Response(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: null,
+                error: { code: -32700, message: 'Parse error' },
+              }),
+              { status: 400, headers: { 'Content-Type': 'application/json' } },
+            );
+          }
+
+          const bearerToken = uniqueAuthCandidates[0];
+          const response = await handleJsonRpc(body, env, bearerToken);
+
+          if (response === null) {
+            return new Response(null, {
+              status: 204,
+              headers: { 'Access-Control-Allow-Origin': '*' },
+            });
+          }
+
+          const acceptsSse = (request.headers.get('Accept') ?? '').includes('text/event-stream');
+          if (acceptsSse) {
+            return new Response(sseEvent('message', response), {
+              headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Access-Control-Allow-Origin': '*',
+              },
+            });
+          }
+
+          return new Response(JSON.stringify(response), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
       }
-    }    return new Response('Not Found', { status: 404 });
+    }
+
+    return new Response('Not Found', { status: 404 });
   },
 };
