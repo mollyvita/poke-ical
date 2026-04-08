@@ -1,6 +1,10 @@
 name = "poke-ical"
-main = "src/worker.ts"
+main = "worker.ts"
 compatibility_date = "2025-01-01"
+
+[[kv_namespaces]]
+binding = "TOKEN_KV"
+id = "b043d7f53f9a4c92afdee30246cca153"
 
 # Required secrets (set via `npx wrangler secret put`):
 #   CALDAV_USERNAME  — Apple ID email
