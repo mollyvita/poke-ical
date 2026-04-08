@@ -1548,44 +1548,6 @@ export default {
           },
         });
       }
-
-      const authorizationHeader = request.headers.get('Authorization') ?? request.headers.get('authorization');
-      const apiKeyHeader = request.headers.get('X-API-Key') ?? request.headers.get('x-api-key');
-
-      const authCandidates = [
-        authorizationHeader?.trim().replace(/^Bearer\s+/i, '').trim() ?? '',
-        apiKeyHeader?.trim() ?? '',
-      ].filter(Boolean);
-
-      const uniqueAuthCandidates = [...new Set(authCandidates)];
-      if (uniqueAuthCandidates.length === 0) {
-        return new Response(JSON.stringify({ error: "Missing authentication token. Use Authorization: Bearer <token>, Authorization: <token>, or X-API-Key: <token>." }), {
-          status: 401,
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-            'WWW-Authenticate': 'Bearer realm="poke-ical"',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-      }
-
-      let credentials: Awaited<ReturnType<typeof loadStoredCredentials>> = null;
-      for (const candidate of uniqueAuthCandidates) {
-        credentials = await loadStoredCredentials(env, candidate);
-        if (credentials) break;
-      }
-
-      if (!credentials) {
-        return new Response(JSON.stringify({ error: "Invalid authentication token. Open /auth to save credentials and use the token shown there." }), {
-          status: 401,
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-            'WWW-Authenticate': 'Bearer realm="poke-ical"',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-      }
-
       // ---- GET: SSE stream — sends endpoint event so clients know where to POST
       if (request.method === 'GET') {
         const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
@@ -1617,6 +1579,42 @@ export default {
 
       // ---- POST: JSON-RPC message
       if (request.method === 'POST') {
+        const authorizationHeader = request.headers.get('Authorization') ?? request.headers.get('authorization');
+        const apiKeyHeader = request.headers.get('X-API-Key') ?? request.headers.get('x-api-key');
+
+        const authCandidates = [
+          authorizationHeader?.trim().replace(/^Bearer\s+/i, '').trim() ?? '',
+          apiKeyHeader?.trim() ?? '',
+        ].filter(Boolean);
+
+        const uniqueAuthCandidates = [...new Set(authCandidates)];
+        if (uniqueAuthCandidates.length === 0) {
+          return new Response(JSON.stringify({ error: "Missing authentication token. Use Authorization: Bearer <token>, Authorization: <token>, or X-API-Key: <token>." }), {
+            status: 401,
+            headers: {
+              'Content-Type': 'application/json; charset=utf-8',
+              'WWW-Authenticate': 'Bearer realm="poke-ical"',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
+
+        let credentials: Awaited<ReturnType<typeof loadStoredCredentials>> = null;
+        for (const candidate of uniqueAuthCandidates) {
+          credentials = await loadStoredCredentials(env, candidate);
+          if (credentials) break;
+        }
+
+        if (!credentials) {
+          return new Response(JSON.stringify({ error: "Invalid authentication token. Open /auth to save credentials and use the token shown there." }), {
+            status: 401,
+            headers: {
+              'Content-Type': 'application/json; charset=utf-8',
+              'WWW-Authenticate': 'Bearer realm="poke-ical"',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
         let body: JsonRpcRequest;
         try {
           body = (await request.json()) as JsonRpcRequest;
