@@ -300,45 +300,150 @@ function loginPage(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>poke-ical — Connect iCloud</title>
+  <title>Poke — Connect iCloud</title>
   <style>
-    body { font-family: -apple-system, system-ui, sans-serif; background: #f5f5f7;
-           display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-    .card { background: #fff; border-radius: 16px; padding: 32px; width: 100%;
-            max-width: 380px; box-shadow: 0 4px 24px rgba(0,0,0,.08); }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    p.sub { color: #666; font-size: 14px; margin: 0 0 20px; }
-    label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 4px; }
-    input { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 15px;
-            border: 1px solid #d2d2d7; border-radius: 8px; }
-    button { width: 100%; margin-top: 20px; padding: 12px; font-size: 15px; font-weight: 600;
-             color: #fff; background: #0071e3; border: 0; border-radius: 8px; cursor: pointer; }
-    button:hover { background: #0077ed; }
-    .err { background: #fff0f0; color: #d70015; border-radius: 8px; padding: 10px 12px;
-           font-size: 13px; margin-top: 16px; }
-    .hint { font-size: 12px; color: #86868b; margin-top: 16px; line-height: 1.5; }
-    a { color: #0071e3; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      background: #ffffff;
+      color: #000000;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .chat {
+      width: 100%;
+      max-width: 420px;
+      padding: 48px 24px 64px;
+      display: flex;
+      flex-direction: column;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 28px;
+      border-bottom: 0.5px solid #e5e5ea;
+      margin-bottom: 28px;
+    }
+    .avatar {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      overflow: hidden;
+      flex-shrink: 0;
+      background: #f2f2f7;
+    }
+    .avatar img { width: 100%; height: 100%; display: block; }
+    .header .name { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
+    .header .sub { font-size: 13px; color: #8e8e93; margin-top: 1px; }
+    .bubble {
+      align-self: flex-start;
+      max-width: 85%;
+      background: #e9e9eb;
+      color: #000;
+      border-radius: 20px;
+      border-bottom-left-radius: 6px;
+      padding: 10px 16px;
+      font-size: 16px;
+      line-height: 1.35;
+      margin-bottom: 28px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #8e8e93;
+      margin: 0 0 6px 4px;
+    }
+    input {
+      width: 100%;
+      padding: 14px 16px;
+      font-size: 17px;
+      font-family: inherit;
+      color: #000;
+      background: #f2f2f7;
+      border: 0.5px solid transparent;
+      border-radius: 14px;
+      outline: none;
+      transition: border-color .15s, background .15s;
+      margin-bottom: 16px;
+    }
+    input:focus {
+      background: #ffffff;
+      border-color: #c7c7cc;
+    }
+    input::placeholder { color: #c7c7cc; }
+    button {
+      width: 100%;
+      padding: 15px;
+      font-size: 17px;
+      font-weight: 600;
+      font-family: inherit;
+      color: #ffffff;
+      background: #000000;
+      border: 0;
+      border-radius: 999px;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: opacity .15s, transform .05s;
+    }
+    button:hover { opacity: .85; }
+    button:active { transform: scale(.985); }
+    .err {
+      align-self: flex-start;
+      background: #fff0f0;
+      color: #d70015;
+      border-radius: 20px;
+      border-bottom-left-radius: 6px;
+      padding: 10px 16px;
+      font-size: 15px;
+      line-height: 1.35;
+      margin: 0 0 20px;
+      max-width: 85%;
+    }
+    .hint {
+      font-size: 12px;
+      color: #aeaeb2;
+      margin-top: 24px;
+      line-height: 1.5;
+      text-align: center;
+    }
+    .hint a { color: #aeaeb2; }
   </style>
 </head>
 <body>
-  <form class="card" method="POST" action="/oauth/authorize">
-    <h1>Connect your iCloud</h1>
-    <p class="sub">poke-ical needs your Apple ID and an app-specific password to read your calendars.</p>
+  <main class="chat">
+    <div class="header">
+      <div class="avatar"><img src="https://poke.com/icons/poke-192.png" alt="Poke"></div>
+      <div>
+        <div class="name">Poke</div>
+        <div class="sub">iCloud Calendar</div>
+      </div>
+    </div>
+
     ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
-    <label for="email">Apple ID email</label>
-    <input id="email" name="email" type="email" required autocomplete="username"
-           placeholder="you@icloud.com">
-    <label for="app_password">App-specific password</label>
-    <input id="app_password" name="app_password" type="password" required
-           autocomplete="off" placeholder="xxxx-xxxx-xxxx-xxxx">
-    ${hidden}
-    <button type="submit">Connect</button>
+    <div class="bubble">To check your calendar I'll need your iCloud login. It stays encrypted and is only used to talk to Apple.</div>
+
+    <form method="POST" action="/oauth/authorize">
+      <label for="email">Apple ID</label>
+      <input id="email" name="email" type="email" required autocomplete="username"
+             placeholder="you@icloud.com">
+      <label for="app_password">App-specific password</label>
+      <input id="app_password" name="app_password" type="password" required
+             autocomplete="off" placeholder="xxxx-xxxx-xxxx-xxxx">
+      ${hidden}
+      <button type="submit">Connect</button>
+    </form>
+
     <p class="hint">
       Generate an app-specific password at
       <a href="https://account.apple.com" target="_blank" rel="noopener">account.apple.com</a>
-      under Sign-In and Security → App-Specific Passwords. Stored encrypted; never shared.
+      under Sign-In and Security → App-Specific Passwords.
     </p>
-  </form>
+  </main>
 </body>
 </html>`;
 }
