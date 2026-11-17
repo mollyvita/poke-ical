@@ -2,6 +2,17 @@ name = "poke-ical"
 main = "src/worker.ts"
 compatibility_date = "2025-01-01"
 
+# OAuth 2.1 storage — create with:
+#   npx wrangler kv namespace create OAUTH_KV
+# then paste the returned id below (and a preview_id for `wrangler dev`).
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "c5dd38ec97ce42839b6b0299724e2fad"
+
 # Required secrets (set via `npx wrangler secret put`):
+#   TOKEN_ENC_KEY    — random secret used to encrypt stored iCloud credentials
+#
+# Optional legacy single-account fallback (bypasses OAuth when no Bearer token
+# is sent). Remove these to require OAuth for all clients:
 #   CALDAV_USERNAME  — Apple ID email
 #   CALDAV_PASSWORD  — App-specific password from appleid.apple.com
