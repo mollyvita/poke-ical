@@ -234,7 +234,10 @@ export async function authenticateRequest(
   const header = request.headers.get('Authorization') ?? '';
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
 
-  if (match && env.OAUTH_KV) {
+  // A presented Bearer token must resolve via OAuth — never fall back to
+  // the shared legacy account when token validation fails or KV is absent.
+  if (match) {
+    if (!env.OAUTH_KV) return unauthorizedResponse(request);
     const token = match[1];
     const rec = await env.OAUTH_KV.get<AccessTokenRecord>(keyAccess(token), 'json');
     if (rec && rec.expires_at > Date.now()) {
@@ -247,7 +250,7 @@ export async function authenticateRequest(
     return unauthorizedResponse(request);
   }
 
-  // Legacy fallback: single shared account via Worker secrets.
+  // Legacy fallback: single shared account via Worker secrets (no token sent).
   if (env.CALDAV_USERNAME && env.CALDAV_PASSWORD) {
     return { username: env.CALDAV_USERNAME, password: env.CALDAV_PASSWORD };
   }

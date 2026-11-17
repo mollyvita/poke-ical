@@ -7,7 +7,7 @@ compatibility_date = "2025-01-01"
 # then paste the returned id below (and a preview_id for `wrangler dev`).
 [[kv_namespaces]]
 binding = "OAUTH_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "c5dd38ec97ce42839b6b0299724e2fad"
 
 # Required secrets (set via `npx wrangler secret put`):
 #   TOKEN_ENC_KEY    — random secret used to encrypt stored iCloud credentials
