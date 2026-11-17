@@ -301,134 +301,165 @@ function loginPage(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Poke — Connect iCloud</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
+    @font-face {
+      font-family: 'Open Runde';
+      src: url('/fonts/openrunde-regular.woff2') format('woff2');
+      font-weight: 400; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: 'Open Runde';
+      src: url('/fonts/openrunde-medium.woff2') format('woff2');
+      font-weight: 500; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: 'Open Runde';
+      src: url('/fonts/openrunde-semibold.woff2') format('woff2');
+      font-weight: 600; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: 'Exposure';
+      src: url('/fonts/exposure-var.woff2') format('woff2');
+      font-weight: 400; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: 'Exposure';
+      src: url('/fonts/exposure-var-italic.woff2') format('woff2');
+      font-weight: 400; font-style: italic; font-display: swap;
+    }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
-      background: #ffffff;
-      color: #000000;
+      font-family: 'Open Runde', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      background: #fff;
+      color: #1c1c1c;
       -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
       display: flex;
       justify-content: center;
-      min-height: 100vh;
     }
-    .chat {
+    main {
       width: 100%;
-      max-width: 420px;
-      padding: 48px 24px 64px;
-      display: flex;
-      flex-direction: column;
+      max-width: 460px;
+      padding: 14vh 24px 64px;
     }
-    .header {
+    .eyebrow {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #837d7c;
+      margin: 0 0 20px;
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding-bottom: 28px;
-      border-bottom: 0.5px solid #e5e5ea;
-      margin-bottom: 28px;
+      gap: 10px;
     }
-    .avatar {
-      width: 52px;
-      height: 52px;
-      border-radius: 14px;
-      overflow: hidden;
-      flex-shrink: 0;
-      background: #f2f2f7;
-    }
-    .avatar img { width: 100%; height: 100%; display: block; }
-    .header .name { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
-    .header .sub { font-size: 13px; color: #8e8e93; margin-top: 1px; }
-    .bubble {
-      align-self: flex-start;
-      max-width: 85%;
-      background: #e9e9eb;
+    .eyebrow img { width: 22px; height: 22px; border-radius: 6px; display: block; }
+    h1 {
+      font-family: 'Exposure', Georgia, serif;
+      font-variation-settings: 'EXPO' -10;
+      font-weight: 400;
+      font-size: clamp(38px, 7vw, 52px);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
       color: #000;
-      border-radius: 20px;
-      border-bottom-left-radius: 6px;
-      padding: 10px 16px;
-      font-size: 16px;
-      line-height: 1.35;
-      margin-bottom: 28px;
+      margin: 0 0 16px;
+    }
+    .lede { color: #6b6b6b; margin: 0 0 28px; max-width: 30em; }
+    .card {
+      background: linear-gradient(180deg, #ffffff 0%, #fafaf9 55%, #f4f4f3 100%);
+      border: 1px solid #d7d6d3;
+      border-radius: 24px;
+      box-shadow:
+        0 1px 2px rgba(0,0,0,0.04),
+        0 12px 32px rgba(0,0,0,0.07),
+        inset 0 0 0 1px rgba(255,255,255,0.6);
+      padding: 28px;
     }
     label {
       display: block;
       font-size: 13px;
       font-weight: 500;
-      color: #8e8e93;
-      margin: 0 0 6px 4px;
+      color: #555;
+      margin-bottom: 7px;
     }
     input {
       width: 100%;
-      padding: 14px 16px;
-      font-size: 17px;
+      height: 46px;
+      padding: 0 15px;
       font-family: inherit;
-      color: #000;
-      background: #f2f2f7;
-      border: 0.5px solid transparent;
-      border-radius: 14px;
+      font-size: 15px;
+      color: #1c1c1c;
+      background: #fff;
+      border: 1px solid #d7d6d3;
+      border-radius: 12px;
       outline: none;
-      transition: border-color .15s, background .15s;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+      transition: border-color .15s ease, box-shadow .15s ease;
       margin-bottom: 16px;
     }
     input:focus {
-      background: #ffffff;
-      border-color: #c7c7cc;
+      border-color: #1c1c1c;
+      box-shadow: 0 0 0 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.03);
     }
-    input::placeholder { color: #c7c7cc; }
+    input::placeholder { color: #b5b3b0; }
     button {
       width: 100%;
-      padding: 15px;
-      font-size: 17px;
-      font-weight: 600;
+      height: 44px;
       font-family: inherit;
-      color: #ffffff;
-      background: #000000;
-      border: 0;
-      border-radius: 999px;
-      cursor: pointer;
-      margin-top: 8px;
-      transition: opacity .15s, transform .05s;
-    }
-    button:hover { opacity: .85; }
-    button:active { transform: scale(.985); }
-    .err {
-      align-self: flex-start;
-      background: #fff0f0;
-      color: #d70015;
-      border-radius: 20px;
-      border-bottom-left-radius: 6px;
-      padding: 10px 16px;
       font-size: 15px;
-      line-height: 1.35;
-      margin: 0 0 20px;
-      max-width: 85%;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      color: #fff;
+      text-shadow: 0 0.5px 0 rgba(0,0,0,0.5);
+      background: linear-gradient(180deg, #3a3a3a 0%, #3a3a3a 52.4%, #2c2c2c 80.29%, #1f1f1f 100%);
+      border: 0;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow:
+        0 0.5px 1px rgba(0,0,0,0.08),
+        0 1px 3px rgba(0,0,0,0.1),
+        0 4px 12px rgba(0,0,0,0.08),
+        inset 0 0 0 1.25px #353535,
+        inset 0 0 12px 0 rgba(255,255,255,0.1);
+      transition: filter .15s ease, transform .1s ease;
+    }
+    button:hover { filter: brightness(1.2); }
+    button:active { transform: scale(0.98); }
+    .err {
+      font-size: 13px;
+      font-weight: 500;
+      color: #d92d20;
+      margin: 0 0 16px;
     }
     .hint {
-      font-size: 12px;
-      color: #aeaeb2;
-      margin-top: 24px;
-      line-height: 1.5;
-      text-align: center;
+      font-size: 12.5px;
+      color: #999;
+      margin-top: 20px;
+      line-height: 1.6;
     }
-    .hint a { color: #aeaeb2; }
+    .hint a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
   </style>
 </head>
 <body>
-  <main class="chat">
-    <div class="header">
-      <div class="avatar"><img src="https://poke.com/icons/poke-192.png" alt="Poke"></div>
-      <div>
-        <div class="name">Poke</div>
-        <div class="sub">iCloud Calendar</div>
-      </div>
-    </div>
+  <main>
+    <p class="eyebrow"><img src="https://poke.com/icons/poke-192.png" alt="">poke × icloud</p>
+    <h1>Connect your iCloud</h1>
+    <p class="lede">
+      Poke needs your Apple ID and an app-specific password to read your
+      calendar over CalDAV. It's verified with Apple, stored encrypted,
+      and only ever used for your account.
+    </p>
 
-    ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
-    <div class="bubble">To check your calendar I'll need your iCloud login. It stays encrypted and is only used to talk to Apple.</div>
-
-    <form method="POST" action="/oauth/authorize">
-      <label for="email">Apple ID</label>
+    <form class="card" method="POST" action="/oauth/authorize">
+      ${error ? `<p class="err">${escapeHtml(error)}</p>` : ''}
+      <label for="email">Apple ID email</label>
       <input id="email" name="email" type="email" required autocomplete="username"
              placeholder="you@icloud.com">
       <label for="app_password">App-specific password</label>
@@ -436,13 +467,12 @@ function loginPage(
              autocomplete="off" placeholder="xxxx-xxxx-xxxx-xxxx">
       ${hidden}
       <button type="submit">Connect</button>
+      <p class="hint">
+        Need an app-specific password? Generate one at
+        <a href="https://account.apple.com" target="_blank" rel="noopener">account.apple.com</a>
+        under Sign-In and Security → App-Specific Passwords.
+      </p>
     </form>
-
-    <p class="hint">
-      Generate an app-specific password at
-      <a href="https://account.apple.com" target="_blank" rel="noopener">account.apple.com</a>
-      under Sign-In and Security → App-Specific Passwords.
-    </p>
   </main>
 </body>
 </html>`;

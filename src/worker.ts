@@ -692,6 +692,33 @@ export default {
     const url = new URL(request.url);
 
     // -----------------------------------------------------------------------
+    // /fonts/* — self-hosted brand fonts (woff2 files stored in KV)
+    // -----------------------------------------------------------------------
+    if (url.pathname.startsWith('/fonts/')) {
+      const name = url.pathname.slice('/fonts/'.length).replace(/\.woff2$/, '');
+      const allowed = new Set([
+        'openrunde-regular',
+        'openrunde-medium',
+        'openrunde-semibold',
+        'exposure-var',
+        'exposure-var-italic',
+      ]);
+      if (env.OAUTH_KV && allowed.has(name)) {
+        const buf = await env.OAUTH_KV.get(`font:${name}`, 'arrayBuffer');
+        if (buf) {
+          return new Response(buf, {
+            headers: {
+              'Content-Type': 'font/woff2',
+              'Cache-Control': 'public, max-age=31536000, immutable',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
+      }
+      return new Response('Not Found', { status: 404 });
+    }
+
+    // -----------------------------------------------------------------------
     // OAuth 2.1 authorization server — metadata, DCR, authorize, token, revoke
     // -----------------------------------------------------------------------
     const oauthResponse = await handleOAuthRequest(request, env, url);
