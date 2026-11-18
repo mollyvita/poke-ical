@@ -6,7 +6,7 @@ An iCloud CalDAV MCP bridge for Poke, deployed as a Cloudflare Worker.
 
 ## How auth works
 
-poke-ical is a self-contained **OAuth 2.1 authorization server** (authorization-code + PKCE) wrapped around the MCP endpoint. Each user connects with their own iCloud account:
+poke-ical is a self-contained **OAuth 2.1 authorization server** (authorization-code + PKCE) wrapped around the MCP endpoint. Each user connects with their own iCloud account. **Connecting your own client? See [CONNECTING.md](CONNECTING.md) for the full flow — or just point an OAuth-capable MCP client at `/mcp` and it handles everything.**
 
 1. The MCP client hits `/mcp` unauthenticated and gets a `401` with a `WWW-Authenticate` header pointing at the protected-resource metadata.
 2. The client discovers the authorization server via `/.well-known/oauth-authorization-server` and registers itself via `/oauth/register` (dynamic client registration).
